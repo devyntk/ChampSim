@@ -60,11 +60,15 @@ public:
 
   std::array<DRAM_CHANNEL, DRAM_CHANNELS> channels;
 
-  MEMORY_CONTROLLER(double freq_scale) : champsim::operable(freq_scale), MemoryRequestConsumer(std::numeric_limits<unsigned>::max()) {}
+  MEMORY_CONTROLLER(double freq_scale) : champsim::operable(freq_scale), MemoryRequestConsumer(std::numeric_limits<unsigned>::max()) {initalize_msched();}
 
   int add_rq(PACKET* packet) override;
   int add_wq(PACKET* packet) override;
   int add_pq(PACKET* packet) override;
+  virtual void initalize_msched() {};
+  virtual void msched_cycle_operate() {};
+  virtual void msched_channel_operate(DRAM_CHANNEL& channel) {};
+  virtual BANK_REQUEST* msched_get_request(DRAM_CHANNEL& channel) {return channel.bank_request.begin();};
 
   void operate() override;
 
@@ -76,6 +80,8 @@ public:
   uint32_t dram_get_bank(uint64_t address);
   uint32_t dram_get_row(uint64_t address);
   uint32_t dram_get_column(uint64_t address);
+  void clear_channel_bank_requests(DRAM_CHANNEL& channel);
 };
+#include "msched.inc"
 
 #endif
