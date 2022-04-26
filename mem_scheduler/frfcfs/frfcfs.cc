@@ -60,7 +60,7 @@ bool frfcfs_sorter(BANK_REQUEST const& rhs, BANK_REQUEST const& lhs) {
 }
 BANK_REQUEST* frfcfs::msched_get_request(std::array<DRAM_CHANNEL, DRAM_CHANNELS> ::iterator channel_it) {
   DRAM_CHANNEL& channel = *channel_it;
-  auto new_req = std::max_element(std::begin(channel.bank_request),std::end(channel.bank_request), frfcfs_sorter);
+  auto new_req = std::min_element(std::begin(channel.bank_request),std::end(channel.bank_request), frfcfs_sorter);
 
   // check if we're switching read/write mode, if so, add penalty
   if (new_req->is_write != channel.write_mode) {

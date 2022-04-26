@@ -85,21 +85,21 @@ void atlas::msched_channel_operate(std::array<DRAM_CHANNEL, DRAM_CHANNELS> ::ite
 }
 bool atlas_sorter(atlas_request const& rhs, atlas_request const& lhs) {
   if (lhs.over_threshold != rhs.over_threshold)
-    return lhs.over_threshold < rhs.over_threshold;
+    return lhs.over_threshold > rhs.over_threshold;
   if (lhs.request->pkt->cpu != lhs.request->pkt->cpu) {
     auto lhs_cpu_priority = thread_rank[lhs.request->pkt->cpu];
     auto rhs_cpu_priority = thread_rank[rhs.request->pkt->cpu];
-    return lhs_cpu_priority < rhs_cpu_priority;
+    return lhs_cpu_priority > rhs_cpu_priority;
   }
   if (lhs.request->row_buffer_hit != rhs.request->row_buffer_hit)
-    return lhs.request->row_buffer_hit < rhs.request->row_buffer_hit;
-  return lhs.schedule_cycle > rhs.schedule_cycle;
+    return lhs.request->row_buffer_hit > rhs.request->row_buffer_hit;
+  return lhs.schedule_cycle < rhs.schedule_cycle;
 }
 
 BANK_REQUEST* atlas::msched_get_request(std::array<DRAM_CHANNEL, DRAM_CHANNELS> ::iterator channel_it) {
   DRAM_CHANNEL& channel = *channel_it;
   auto channel_rqs = request_attributes[std::distance(std::begin(channels), channel_it)];
-  auto new_req = std::max_element(std::begin(channel_rqs),std::end(channel_rqs), atlas_sorter);
+  auto new_req = std::min_element(std::begin(channel_rqs),std::end(channel_rqs), atlas_sorter);
 
   // check if we're switching read/write mode, if so, add penalty
   if (new_req->is_write != channel.write_mode) {

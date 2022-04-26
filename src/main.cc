@@ -478,15 +478,19 @@ int main(int argc, char** argv)
   cout << endl << "ChampSim completed all CPUs" << endl;
   if (NUM_CPUS > 1) {
     cout << endl << "Total Simulation Statistics (not including warmup)" << endl;
+    float tot_cum_ipc = 0;
     for (uint32_t i = 0; i < NUM_CPUS; i++) {
+      float cum_ipc =(float)(ooo_cpu[i]->num_retired - ooo_cpu[i]->begin_sim_instr) / (ooo_cpu[i]->current_cycle - ooo_cpu[i]->begin_sim_cycle);
+      tot_cum_ipc += cum_ipc;
       cout << endl
            << "CPU " << i
-           << " cumulative IPC: " << (float)(ooo_cpu[i]->num_retired - ooo_cpu[i]->begin_sim_instr) / (ooo_cpu[i]->current_cycle - ooo_cpu[i]->begin_sim_cycle);
+           << " cumulative IPC: " << cum_ipc;
       cout << " instructions: " << ooo_cpu[i]->num_retired - ooo_cpu[i]->begin_sim_instr
            << " cycles: " << ooo_cpu[i]->current_cycle - ooo_cpu[i]->begin_sim_cycle << endl;
       for (auto it = caches.rbegin(); it != caches.rend(); ++it)
         print_sim_stats(i, *it);
     }
+    cout << "all-core cumulative IPC: " << tot_cum_ipc << endl;
   }
 
   cout << endl << "Region of Interest Statistics" << endl;
