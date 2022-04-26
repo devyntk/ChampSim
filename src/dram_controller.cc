@@ -10,7 +10,7 @@ extern uint8_t all_warmup_complete;
 void MEMORY_CONTROLLER::operate()
 {
   msched_cycle_operate();
-  for (auto channel_it = std::begin(channels); channel_it != std::end(channels); channel_it++){
+  for (auto channel_it = std::begin(channels); channel_it != std::end(channels); channel_it++) {
     DRAM_CHANNEL& channel = *channel_it;
     // Finish request
     if (channel.active_request != std::end(channel.bank_request) && channel.active_request->event_cycle <= current_cycle) {
@@ -202,10 +202,10 @@ void MEMORY_CONTROLLER::clear_channel_bank_requests(DRAM_CHANNEL& channel)
     }
   }
 }
-void MEMORY_CONTROLLER::add_packet(std::vector<PACKET>::iterator packet, DRAM_CHANNEL& channel, bool is_write) {
+void MEMORY_CONTROLLER::add_packet(std::vector<PACKET>::iterator packet, DRAM_CHANNEL& channel, bool is_write)
+{
   if (is_valid<PACKET>()(*packet) && packet->event_cycle <= current_cycle) {
-    uint32_t op_rank = dram_get_rank(packet->address), op_bank = dram_get_bank(packet->address),
-             op_row = dram_get_row(packet->address);
+    uint32_t op_rank = dram_get_rank(packet->address), op_bank = dram_get_bank(packet->address), op_row = dram_get_row(packet->address);
 
     auto op_idx = op_rank * DRAM_BANKS + op_bank;
 

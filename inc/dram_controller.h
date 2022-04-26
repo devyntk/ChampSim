@@ -60,15 +60,15 @@ public:
 
   std::array<DRAM_CHANNEL, DRAM_CHANNELS> channels;
 
-  MEMORY_CONTROLLER(double freq_scale) : champsim::operable(freq_scale), MemoryRequestConsumer(std::numeric_limits<unsigned>::max()) {initalize_msched();}
+  MEMORY_CONTROLLER(double freq_scale) : champsim::operable(freq_scale), MemoryRequestConsumer(std::numeric_limits<unsigned>::max()) { initalize_msched(); }
 
   int add_rq(PACKET* packet) override;
   int add_wq(PACKET* packet) override;
   int add_pq(PACKET* packet) override;
-  virtual void initalize_msched() {};
-  virtual void msched_cycle_operate() {};
-  virtual void msched_channel_operate(std::array<DRAM_CHANNEL, DRAM_CHANNELS> ::iterator channel_it) {};
-  virtual BANK_REQUEST* msched_get_request(std::array<DRAM_CHANNEL, DRAM_CHANNELS> ::iterator channel_it) {return (*channel_it).bank_request.begin();};
+  virtual void initalize_msched(){};
+  virtual void msched_cycle_operate(){};
+  virtual void msched_channel_operate(std::array<DRAM_CHANNEL, DRAM_CHANNELS>::iterator channel_it){};
+  virtual BANK_REQUEST* msched_get_request(std::array<DRAM_CHANNEL, DRAM_CHANNELS>::iterator channel_it) { return (*channel_it).bank_request.begin(); };
   virtual void add_packet(std::vector<PACKET>::iterator packet, DRAM_CHANNEL& channel, bool is_write);
 
   void operate() override;
