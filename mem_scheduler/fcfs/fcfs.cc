@@ -3,14 +3,15 @@
 #include <numeric>
 #include <algorithm>
 
+struct is_unscheduled {
+  bool operator()(const PACKET& lhs) { return !lhs.scheduled; }
+};
+struct next_schedule : public invalid_is_maximal<PACKET, min_event_cycle<PACKET>, PACKET, is_unscheduled, is_unscheduled> {
+};
+
 
 void fcfs::initalize_msched() {}
 void fcfs::msched_cycle_operate() {
-  clearing_count++;
-  if (clearing_count >= clearing_interval){
-    for(long unsigned int i = 0; i < NUM_CPUS; i++)
-      is_blacklisted[i] = false;
-  }
 }
 void fcfs::add_packet(std::vector<PACKET>::iterator packet, DRAM_CHANNEL& channel, bool is_write){
   MEMORY_CONTROLLER::add_packet(packet, channel, is_write);
@@ -41,12 +42,13 @@ void fcfs::msched_channel_operate(std::array<DRAM_CHANNEL, DRAM_CHANNELS> ::iter
   // Look for queued packets that have not been scheduled
   std::vector<PACKET>::iterator iter_next_schedule;
   bool is_write;
-  if (channel.write_mode)
+  if (channel.write_mode) {
     iter_next_schedule = std::min_element(std::begin(channel.WQ), std::end(channel.WQ), next_schedule());
-  is_write = true;
-  else
-      iter_next_schedule = std::min_element(std::begin(channel.RQ), std::end(channel.RQ), next_schedule());
-  is_write = false;
+    is_write = true;
+  }else {
+    iter_next_schedule = std::min_element(std::begin(channel.RQ), std::end(channel.RQ), next_schedule());
+    is_write = false;
+  }
 
   MEMORY_CONTROLLER::add_packet(iter_next_schedule, channel, is_write);
 }

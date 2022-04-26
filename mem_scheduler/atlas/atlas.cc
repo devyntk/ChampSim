@@ -57,7 +57,7 @@ void atlas::add_packet(std::vector<PACKET>::iterator packet, DRAM_CHANNEL& chann
       bool row_buffer_hit = (channel.bank_request[op_idx].open_row == op_row);
 
       // this bank is now busy
-      channel.bank_request[op_idx] = {true, row_buffer_hit, op_row, current_cycle + tCAS + (row_buffer_hit ? 0 : tRP + tRCD), packet};
+      channel.bank_request[op_idx] = {true, is_write, row_buffer_hit, op_row, current_cycle + tCAS + (row_buffer_hit ? 0 : tRP + tRCD), packet};
 
       packet->scheduled = true;
       packet->event_cycle = std::numeric_limits<uint64_t>::max();

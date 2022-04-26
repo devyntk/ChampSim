@@ -1,17 +1,20 @@
 #include "dram_controller.h"
+#include <array>
+#include <numeric>
+#include <algorithm>
 
-bool frfcfs_sorter(BANK_REQUEST const& rhs, BANK_REQUEST const& lhs) {
-  if (lhs.row_buffer_hit != rhs.row_buffer_hit)
-    // swapped since we want to sort the buffer hits at the bottom
-    return lhs.row_buffer_hit > rhs.row_buffer_hit;
-  return lhs.event_cycle < rhs.event_cycle;
-}
+struct is_unscheduled {
+  bool operator()(const PACKET& lhs) { return !lhs.scheduled; }
+};
+struct next_schedule : public invalid_is_maximal<PACKET, min_event_cycle<PACKET>, PACKET, is_unscheduled, is_unscheduled> {
+};
+
 
 void frfcfs::initalize_msched() {}
-void frfcfs::msched_cycle_operate() {}
-BANK_REQUEST* frfcfs::msched_get_request(std::array<DRAM_CHANNEL, DRAM_CHANNELS>::iterator channel_it) {
-  DRAM_CHANNEL& channel = *channel_it;
-  return std::min_element(std::begin(channel.bank_request), std::end(channel.bank_request), frfcfs_sorter);
+void frfcfs::msched_cycle_operate() {
+}
+void frfcfs::add_packet(std::vector<PACKET>::iterator packet, DRAM_CHANNEL& channel, bool is_write){
+  MEMORY_CONTROLLER::add_packet(packet, channel, is_write);
 }
 void frfcfs::msched_channel_operate(std::array<DRAM_CHANNEL, DRAM_CHANNELS> ::iterator channel_it) {
   DRAM_CHANNEL& channel = *channel_it;
@@ -39,12 +42,36 @@ void frfcfs::msched_channel_operate(std::array<DRAM_CHANNEL, DRAM_CHANNELS> ::it
   // Look for queued packets that have not been scheduled
   std::vector<PACKET>::iterator iter_next_schedule;
   bool is_write;
-  if (channel.write_mode)
+  if (channel.write_mode) {
     iter_next_schedule = std::min_element(std::begin(channel.WQ), std::end(channel.WQ), next_schedule());
     is_write = true;
-  else
+  }else {
     iter_next_schedule = std::min_element(std::begin(channel.RQ), std::end(channel.RQ), next_schedule());
     is_write = false;
+  }
 
   MEMORY_CONTROLLER::add_packet(iter_next_schedule, channel, is_write);
+}
+bool frfcfs_sorter(BANK_REQUEST const& rhs, BANK_REQUEST const& lhs) {
+  if (lhs.row_buffer_hit != rhs.row_buffer_hit)
+    // swapped since we want to sort the buffer hits at the bottom
+    return lhs.row_buffer_hit > rhs.row_buffer_hit;
+  return lhs.event_cycle < rhs.event_cycle;
+}
+BANK_REQUEST* frfcfs::msched_get_request(std::array<DRAM_CHANNEL, DRAM_CHANNELS> ::iterator channel_it) {
+  DRAM_CHANNEL& channel = *channel_it;
+  auto new_req = std::max_element(std::begin(channel.bank_request),std::end(channel.bank_request), frfcfs_sorter);
+
+  // check if we're switching read/write mode, if so, add penalty
+  if (new_req->is_write != channel.write_mode) {
+    // Add data bus turn-around time
+    if (channel.active_request != std::end(channel.bank_request))
+      channel.dbus_cycle_available = channel.active_request->event_cycle + DRAM_DBUS_TURN_AROUND_TIME; // After ongoing finish
+    else
+      channel.dbus_cycle_available = current_cycle + DRAM_DBUS_TURN_AROUND_TIME;
+    // Set the channel mode
+    channel.write_mode = new_req->is_write;
+  }
+
+  return new_req;
 }
