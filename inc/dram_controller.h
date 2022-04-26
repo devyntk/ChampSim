@@ -25,7 +25,7 @@ constexpr int32_t ceil(float num)
 } // namespace detail
 
 struct BANK_REQUEST {
-  bool valid = false, row_buffer_hit = false;
+  bool valid = false, row_buffer_hit = false, is_write = false;
 
   std::size_t open_row = std::numeric_limits<uint32_t>::max();
 
@@ -67,8 +67,9 @@ public:
   int add_pq(PACKET* packet) override;
   virtual void initalize_msched() {};
   virtual void msched_cycle_operate() {};
-  virtual void msched_channel_operate(DRAM_CHANNEL& channel) {};
-  virtual BANK_REQUEST* msched_get_request(DRAM_CHANNEL& channel) {return channel.bank_request.begin();};
+  virtual void msched_channel_operate(std::array<DRAM_CHANNEL, DRAM_CHANNELS> ::iterator channel_it) {};
+  virtual BANK_REQUEST* msched_get_request(std::array<DRAM_CHANNEL, DRAM_CHANNELS> ::iterator channel_it) {return (*channel_it).bank_request.begin();};
+  virtual void add_packet(std::vector<PACKET>::iterator packet, DRAM_CHANNEL& channel, bool is_write);
 
   void operate() override;
 

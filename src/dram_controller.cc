@@ -10,7 +10,8 @@ extern uint8_t all_warmup_complete;
 void MEMORY_CONTROLLER::operate()
 {
   msched_cycle_operate();
-  for (auto& channel : channels) {
+  for (auto channel_it = std::begin(channels); channel_it != std::end(channels); channel_it++){
+    DRAM_CHANNEL& channel = *channel_it;
     // Finish request
     if (channel.active_request != std::end(channel.bank_request) && channel.active_request->event_cycle <= current_cycle) {
       for (auto ret : channel.active_request->pkt->to_return)
@@ -49,7 +50,7 @@ void MEMORY_CONTROLLER::operate()
         channel.dbus_count_congested++;
       }
     }
-    msched_channel_operate(channel);
+    msched_channel_operate(channel_it);
   }
 }
 
@@ -197,6 +198,24 @@ void MEMORY_CONTROLLER::clear_channel_bank_requests(DRAM_CHANNEL& channel) {
       it->valid = false;
       it->pkt->scheduled = false;
       it->pkt->event_cycle = current_cycle;
+    }
+  }
+}
+void MEMORY_CONTROLLER::add_packet(std::vector<PACKET>::iterator packet, DRAM_CHANNEL& channel, bool is_write) {
+  if (is_valid<PACKET>()(*packet) && packet->event_cycle <= current_cycle) {
+    uint32_t op_rank = dram_get_rank(packet->address), op_bank = dram_get_bank(packet->address),
+             op_row = dram_get_row(packet->address);
+
+    auto op_idx = op_rank * DRAM_BANKS + op_bank;
+
+    if (!channel.bank_request[op_idx].valid) {
+      bool row_buffer_hit = (channel.bank_request[op_idx].open_row == op_row);
+
+      // this bank is now busy
+      channel.bank_request[op_idx] = {true, row_buffer_hit, is_write, op_row, current_cycle + tCAS + (row_buffer_hit ? 0 : tRP + tRCD), packet};
+
+      packet->scheduled = true;
+      packet->event_cycle = std::numeric_limits<uint64_t>::max();
     }
   }
 }

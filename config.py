@@ -679,8 +679,9 @@ with open('inc/msched.inc', 'wt') as wfp:
         wfp.write('{\npublic: \n')
         wfp.write('void initalize_msched() override;\n')
         wfp.write('void msched_cycle_operate() override;\n')
-        wfp.write('void msched_channel_operate(DRAM_CHANNEL& channel) override;\n')
-        wfp.write('BANK_REQUEST* msched_get_request(DRAM_CHANNEL& channel) override;\n')
+        wfp.write('void msched_channel_operate(std::array<DRAM_CHANNEL, DRAM_CHANNELS> ::iterator channel_it) override;\n')
+        wfp.write('BANK_REQUEST* msched_get_request(std::array<DRAM_CHANNEL, DRAM_CHANNELS> ::iterator channel_it) override;\n')
+        wfp.write('void add_packet(std::vector<PACKET>::iterator packet, DRAM_CHANNEL& channel, bool is_write) override; \n')
         wfp.write('{}(double freqScale) : MEMORY_CONTROLLER(freqScale){{}}'.format(config_file['physical_memory']['scheduler']))
         wfp.write('};\n#endif\n')
 
