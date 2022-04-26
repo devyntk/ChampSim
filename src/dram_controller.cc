@@ -185,7 +185,8 @@ uint32_t MEMORY_CONTROLLER::get_size(uint8_t queue_type, uint64_t address)
   return 0;
 }
 
-void MEMORY_CONTROLLER::clear_channel_bank_requests(DRAM_CHANNEL& channel) {
+void MEMORY_CONTROLLER::clear_channel_bank_requests(DRAM_CHANNEL& channel)
+{
   for (auto it = std::begin(channel.bank_request); it != std::end(channel.bank_request); ++it) {
     // Leave active request on the data bus
     if (it != channel.active_request && it->valid) {
