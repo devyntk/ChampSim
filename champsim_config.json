@@ -68,7 +68,7 @@
         "tRCD": 12.5,
         "tCAS": 12.5,
         "turn_around_time": 7.5,
-        "scheduler": "parbs"
+        "scheduler": "fcfs"
     },
 
     "virtual_memory": {

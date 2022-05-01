@@ -4,11 +4,13 @@
 #include <array>
 #include <cmath>
 #include <limits>
+#include <type_traits>
 
 #include "champsim_constants.h"
 #include "memory_class.h"
 #include "operable.h"
 #include "util.h"
+#include "dram_addr.h"
 
 // these values control when to send out a burst of writes
 constexpr std::size_t DRAM_WRITE_HIGH_WM = ((DRAM_WQ_SIZE * 7) >> 3);         // 7/8th
@@ -24,6 +26,13 @@ constexpr int32_t ceil(float num)
 }
 } // namespace detail
 
+/*
+ * | row address | rank index | column address | bank index | channel | block offset |
+ */
+
+
+
+
 struct BANK_REQUEST {
   bool valid = false, row_buffer_hit = false, is_write = false;
 
@@ -31,26 +40,13 @@ struct BANK_REQUEST {
 
   uint64_t event_cycle = 0;
 
-  std::vector<PACKET>::iterator pkt;
+  PACKET* pkt;
 };
-
-struct DRAM_CHANNEL {
-  std::vector<PACKET> WQ{DRAM_WQ_SIZE};
-  std::vector<PACKET> RQ{DRAM_RQ_SIZE};
-
-  std::array<BANK_REQUEST, DRAM_RANKS* DRAM_BANKS> bank_request = {};
-  std::array<BANK_REQUEST, DRAM_RANKS* DRAM_BANKS>::iterator active_request = std::end(bank_request);
-
-  uint64_t dbus_cycle_available = 0, dbus_cycle_congested = 0, dbus_count_congested = 0;
-
-  bool write_mode = false;
-
-  unsigned WQ_ROW_BUFFER_HIT = 0, WQ_ROW_BUFFER_MISS = 0, RQ_ROW_BUFFER_HIT = 0, RQ_ROW_BUFFER_MISS = 0, WQ_FULL = 0;
-};
-
-class MEMORY_CONTROLLER : public champsim::operable, public MemoryRequestConsumer
-{
+template <typename req>
+class DRAM_CHANNEL {
 public:
+  static_assert(std::is_base_of<BANK_REQUEST, req>::value, "Invalid template type");
+
   // DRAM_IO_FREQ defined in champsim_constants.h
   const static uint64_t tRP = detail::ceil(1.0 * tRP_DRAM_NANOSECONDS * DRAM_IO_FREQ / 1000);
   const static uint64_t tRCD = detail::ceil(1.0 * tRCD_DRAM_NANOSECONDS * DRAM_IO_FREQ / 1000);
@@ -58,31 +54,113 @@ public:
   const static uint64_t DRAM_DBUS_TURN_AROUND_TIME = detail::ceil(1.0 * DBUS_TURN_AROUND_NANOSECONDS * DRAM_IO_FREQ / 1000);
   const static uint64_t DRAM_DBUS_RETURN_TIME = detail::ceil(1.0 * BLOCK_SIZE / DRAM_CHANNEL_WIDTH);
 
-  std::array<DRAM_CHANNEL, DRAM_CHANNELS> channels;
+  using req_it = typename std::array<req, DRAM_RANKS* DRAM_BANKS>::iterator;
+  req_it active_request = std::end(bank_request);
 
-  MEMORY_CONTROLLER(double freq_scale) : champsim::operable(freq_scale), MemoryRequestConsumer(std::numeric_limits<unsigned>::max()) {initalize_msched();}
+  uint64_t dbus_cycle_available = 0, dbus_cycle_congested = 0, dbus_count_congested = 0;
+  unsigned WQ_ROW_BUFFER_HIT = 0, WQ_ROW_BUFFER_MISS = 0, RQ_ROW_BUFFER_HIT = 0, RQ_ROW_BUFFER_MISS = 0, WQ_FULL = 0;
+  bool write_mode = false;
 
+  // one request per bank (there are DRAM_BANKS banks in each rank)
+  std::array<req, DRAM_RANKS* DRAM_BANKS> bank_request = {};
+  req_it get_bank(uint32_t addr) {
+      auto it = std::begin(bank_request);
+      std::advance(it, get_bank_addr(addr));
+      return it;
+  };
+
+  virtual void initalize_channel(uint64_t current_cycle) = 0;
+  virtual req_it get_new_active_request(uint64_t current_cycle) = 0;
+  virtual PACKET& fill_bank_request() = 0;
+  virtual void custom_operate() = 0;
+
+  void clear_channel_bank_requests(uint32_t current_cycle);
+  void print_generic_stats();
+  void print_stats() {print_generic_stats();};
+  void operate(uint64_t current_cycle);
+};
+
+
+template <typename chan, typename req>
+class MEMORY_CONTROLLER : public champsim::operable, public MemoryRequestConsumer
+{
+public:
+
+  static_assert(std::is_base_of<DRAM_CHANNEL<req>, chan>::value, "Invalid template type");
+  std::array<chan, DRAM_CHANNELS> channels;
+
+  explicit MEMORY_CONTROLLER(double freq_scale) : champsim::operable(freq_scale),
+                                                  MemoryRequestConsumer(std::numeric_limits<unsigned>::max()){
+    initalize_msched();
+  }
+
+  // queue related virtual methods to implement
+  virtual int add_rq(PACKET* packet) override = 0;
+  virtual int add_wq(PACKET* packet) override = 0;
+  virtual int add_pq(PACKET* packet) override = 0;
+  virtual uint32_t get_occupancy(uint8_t queue_type, uint64_t address) override = 0;
+  virtual uint32_t get_size(uint8_t queue_type, uint64_t address) override = 0;
+
+  // controller specific virtual methods
+  virtual void initalize_msched() {};
+  virtual void cycle_operate() {};
+  virtual void print_stats() {};
+
+  void operate() override {
+    cycle_operate();
+    for (auto channel_it = std::begin(channels); channel_it != std::end(channels); channel_it++){
+      chan& channel = *channel_it;
+      channel.operate(current_cycle);
+    }
+  };
+
+  chan& get_channel_obj(uint64_t addr){
+    return channels[dram_get_channel(addr)];
+  };
+
+  void clear_channel_bank_requests(chan& channel);
+};
+
+template <typename req>
+class SPLIT_MEM_CHANNEL: public DRAM_CHANNEL<req>
+{
+public:
+  using req_it = typename std::array<req, DRAM_RANKS* DRAM_BANKS>::iterator;
+  std::vector<PACKET> WQ{DRAM_WQ_SIZE};
+  std::vector<PACKET> RQ{DRAM_RQ_SIZE};
+
+  void initalize_channel(uint64_t current_cycle) override {};
+  req_it get_new_active_request(uint64_t current_cycle) override {};
+  PACKET& fill_bank_request() override {};
+  void custom_operate() override {};
+};
+template <typename chan, typename req>
+class SPLIT_MEM_CONTROLLER: public MEMORY_CONTROLLER<chan, req>
+{
+public:
+  explicit SPLIT_MEM_CONTROLLER(double freq_scale) : MEMORY_CONTROLLER<chan, req>(freq_scale) {};
   int add_rq(PACKET* packet) override;
   int add_wq(PACKET* packet) override;
   int add_pq(PACKET* packet) override;
-  virtual void initalize_msched() {};
-  virtual void msched_cycle_operate() {};
-  virtual void msched_channel_operate(std::array<DRAM_CHANNEL, DRAM_CHANNELS> ::iterator channel_it) {};
-  virtual BANK_REQUEST* msched_get_request(std::array<DRAM_CHANNEL, DRAM_CHANNELS> ::iterator channel_it) {return (*channel_it).bank_request.begin();};
-  virtual void add_packet(std::vector<PACKET>::iterator packet, DRAM_CHANNEL& channel, bool is_write);
+  uint32_t get_occupancy(uint8_t queue_type, uint64_t address);
+  uint32_t get_size(uint8_t queue_type, uint64_t address);
 
-  void operate() override;
-
-  uint32_t get_occupancy(uint8_t queue_type, uint64_t address) override;
-  uint32_t get_size(uint8_t queue_type, uint64_t address) override;
-
-  uint32_t dram_get_channel(uint64_t address);
-  uint32_t dram_get_rank(uint64_t address);
-  uint32_t dram_get_bank(uint64_t address);
-  uint32_t dram_get_row(uint64_t address);
-  uint32_t dram_get_column(uint64_t address);
-  void clear_channel_bank_requests(DRAM_CHANNEL& channel);
+  void print_stats();
 };
-#include "msched.inc"
+class GEN_MEM_CHANNEL: public SPLIT_MEM_CHANNEL<BANK_REQUEST> {};
+class GEN_MEMORY_CONTROLLER: public SPLIT_MEM_CONTROLLER<GEN_MEM_CHANNEL, BANK_REQUEST> {};
+
+//class SINGLE_BUF_CHANNEL: public DRAM_CHANNEL
+//{
+//  SINGLE_BUF_CHANNEL() {}
+//  std::vector<PACKET> QUEUE{DRAM_WQ_SIZE};
+//};
+//class SINGLE_BUF_CONTROLLER: public MEMORY_CONTROLLER
+//{
+//  using channel_t = SINGLE_BUF_CHANNEL;
+//  std::array<channel_t, DRAM_CHANNELS> channels;
+//};
+#include "dram_controller.tpp"
+
 
 #endif

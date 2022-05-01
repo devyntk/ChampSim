@@ -27,7 +27,7 @@ auto start_time = time(NULL);
 // For backwards compatibility with older module source.
 champsim::deprecated_clock_cycle current_core_cycle;
 
-extern MEMORY_CONTROLLER DRAM;
+extern GEN_MEMORY_CONTROLLER DRAM;
 extern VirtualMemory vmem;
 extern std::array<O3_CPU*, NUM_CPUS> ooo_cpu;
 extern std::array<CACHE*, NUM_CACHES> caches;
