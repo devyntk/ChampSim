@@ -1,77 +1,32 @@
-#include "dram_controller.h"
-#include <array>
-#include <numeric>
-#include <algorithm>
+#ifndef frfcfs_cc
+#define frfcfs_cc
 
-struct is_unscheduled {
-  bool operator()(const PACKET& lhs) { return !lhs.scheduled; }
-};
-struct next_schedule : public invalid_is_maximal<PACKET, min_event_cycle<PACKET>, PACKET, is_unscheduled, is_unscheduled> {
-};
-
-
-void frfcfs::initalize_msched() {}
-void frfcfs::msched_cycle_operate() {
-}
-void frfcfs::add_packet(std::vector<PACKET>::iterator packet, DRAM_CHANNEL& channel, bool is_write){
-  MEMORY_CONTROLLER::add_packet(packet, channel, is_write);
-}
-void frfcfs::msched_channel_operate(std::array<DRAM_CHANNEL, DRAM_CHANNELS> ::iterator channel_it) {
-  DRAM_CHANNEL& channel = *channel_it;
-  // Check queue occupancy
-  std::size_t wq_occu = std::count_if(std::begin(channel.WQ), std::end(channel.WQ), is_valid<PACKET>());
-  std::size_t rq_occu = std::count_if(std::begin(channel.RQ), std::end(channel.RQ), is_valid<PACKET>());
-
-  // Change modes if the queues are unbalanced
-  if ((!channel.write_mode && (wq_occu >= DRAM_WRITE_HIGH_WM || (rq_occu == 0 && wq_occu > 0)))
-      || (channel.write_mode && (wq_occu == 0 || (rq_occu > 0 && wq_occu < DRAM_WRITE_LOW_WM)))) {
-    // Reset scheduled requests
-    clear_channel_bank_requests(channel);
-
-    // Add data bus turn-around time
-    if (channel.active_request != std::end(channel.bank_request))
-      channel.dbus_cycle_available = channel.active_request->event_cycle + DRAM_DBUS_TURN_AROUND_TIME; // After ongoing finish
-    else
-      channel.dbus_cycle_available = current_cycle + DRAM_DBUS_TURN_AROUND_TIME;
-
-    // Invert the mode
-    channel.write_mode = !channel.write_mode;
+#include "frfcfs.h"
+template <typename T = BANK_REQUEST, typename U = BANK_REQUEST>
+struct cmp_event_cycle_ready {
+  bool operator()(const T& lhs, const U& rhs) {
+    if (lhs.row_buffer_hit != rhs.row_buffer_hit) {
+      return lhs.row_buffer_hit < rhs.row_buffer_hit;
+    }
+    return lhs.event_cycle < rhs.event_cycle;
   }
-
-
-  // Look for queued packets that have not been scheduled
+};
+template <typename T>
+struct min_event_cycle_ready : invalid_is_maximal<T, cmp_event_cycle_ready<T>> {
+};
+frfcfs_channel::req_it frfcfs_channel::get_new_active_request() {
+  return std::min_element(std::begin(bank_request), std::end(bank_request), min_event_cycle_ready<BANK_REQUEST>());
+}
+PACKET& frfcfs_channel::fill_bank_request() {
   std::vector<PACKET>::iterator iter_next_schedule;
-  bool is_write;
-  if (channel.write_mode) {
-    iter_next_schedule = std::min_element(std::begin(channel.WQ), std::end(channel.WQ), next_schedule());
-    is_write = true;
-  }else {
-    iter_next_schedule = std::min_element(std::begin(channel.RQ), std::end(channel.RQ), next_schedule());
-    is_write = false;
-  }
-
-  MEMORY_CONTROLLER::add_packet(iter_next_schedule, channel, is_write);
+  if (write_mode)
+    iter_next_schedule = std::min_element(std::begin(WQ), std::end(WQ), invalid_is_maximal<PACKET, min_event_cycle<PACKET>, PACKET, is_unscheduled, is_unscheduled>());
+  else
+    iter_next_schedule = std::min_element(std::begin(RQ), std::end(RQ), invalid_is_maximal<PACKET, min_event_cycle<PACKET>, PACKET, is_unscheduled, is_unscheduled>());
+  return *iter_next_schedule;
 }
-bool frfcfs_sorter(BANK_REQUEST const& rhs, BANK_REQUEST const& lhs) {
-  if (lhs.row_buffer_hit != rhs.row_buffer_hit)
-    // swapped since we want to sort the buffer hits at the bottom
-    return lhs.row_buffer_hit > rhs.row_buffer_hit;
-  return lhs.event_cycle < rhs.event_cycle;
-}
-BANK_REQUEST* frfcfs::msched_get_request(std::array<DRAM_CHANNEL, DRAM_CHANNELS> ::iterator channel_it) {
-  DRAM_CHANNEL& channel = *channel_it;
-  auto new_req = std::min_element(std::begin(channel.bank_request),std::end(channel.bank_request), frfcfs_sorter);
+bool frfcfs_channel::operator()(const BANK_REQUEST& lhs, const BANK_REQUEST& rhs) {
 
-  // check if we're switching read/write mode, if so, add penalty
-  if (new_req->is_write != channel.write_mode) {
-    // Add data bus turn-around time
-    if (channel.active_request != std::end(channel.bank_request))
-      channel.dbus_cycle_available = channel.active_request->event_cycle + DRAM_DBUS_TURN_AROUND_TIME; // After ongoing finish
-    else
-      channel.dbus_cycle_available = current_cycle + DRAM_DBUS_TURN_AROUND_TIME;
-    // Set the channel mode
-    channel.write_mode = new_req->is_write;
-  }
-
-  return new_req;
 }
+
+#endif

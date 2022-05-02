@@ -1,34 +1,20 @@
 #ifndef fcfs_cc
 #define fcfs_cc
 
-#include "dram_controller.h"
-#include <array>
-#include <numeric>
-#include <algorithm>
+#include "fcfs.h"
 
-struct is_unscheduled {
-  bool operator()(const PACKET& lhs) { return !lhs.scheduled; }
-};
-struct next_schedule : public invalid_is_maximal<PACKET, min_event_cycle<PACKET>, PACKET, is_unscheduled, is_unscheduled> {
-};
+struct next_schedule_ready : public invalid_is_maximal<PACKET, min_event_cycle<PACKET>, PACKET, is_unscheduled, is_unscheduled> {};
 
-class fcfs_channel: public SPLIT_MEM_CHANNEL<BANK_REQUEST>
-{
-  void initalize_channel(uint64_t current_cycle) override {};
-  req_it get_new_active_request(uint64_t current_cycle) override {};
-  PACKET & fill_bank_request() override {};
-  void custom_operate() override {};
-};
+fcfs_channel::req_it fcfs_channel::get_new_active_request() {
+  return std::min_element(std::begin(bank_request), std::end(bank_request), min_event_cycle<BANK_REQUEST>());
+}
+PACKET& fcfs_channel::fill_bank_request() {
+  std::vector<PACKET>::iterator iter_next_schedule;
+  if (write_mode)
+    iter_next_schedule = std::min_element(std::begin(WQ), std::end(WQ), next_schedule_ready());
+  else
+    iter_next_schedule = std::min_element(std::begin(RQ), std::end(RQ), next_schedule_ready());
+  return *iter_next_schedule;
+}
 
-class fcfs: public SPLIT_MEM_CONTROLLER<fcfs_channel, BANK_REQUEST>
-{
-public:
-  explicit fcfs(double freq_scale) : SPLIT_MEM_CONTROLLER<fcfs_channel, BANK_REQUEST>(freq_scale) {};
-
-  // controller specific virtual methods
-  void initalize_msched() override {};
-  void cycle_operate() override {};
-  void print_stats() override {};
-
-};
 #endif

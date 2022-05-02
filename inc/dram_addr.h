@@ -7,6 +7,10 @@
 #ifndef CHAMPSIM_DRAM_ADDR_H
 #define CHAMPSIM_DRAM_ADDR_H
 
+/*
+ * | row address | rank index | column address | bank index | channel | block offset |
+ */
+
 uint32_t dram_get_channel(uint64_t address);
 uint32_t dram_get_bank(uint64_t address);
 uint32_t dram_get_column(uint64_t address);

@@ -19,7 +19,7 @@ def norm_fname(fname):
 ###
 # Begin format strings
 ###
-
+DRAM = "DRAM"
 cache_fmtstr = 'CACHE {name}("{name}", {frequency}, {fill_level}, {sets}, {ways}, {wq_size}, {rq_size}, {pq_size}, {mshr_size}, {hit_latency}, {fill_latency}, {max_read}, {max_write}, {offset_bits}, {prefetch_as_load:b}, {wq_check_full_addr:b}, {virtual_prefetch:b}, {prefetch_activate_mask}, {lower_level}, CACHE::pref_t::{prefetcher_name}, CACHE::repl_t::{replacement_name});\n'
 ptw_fmtstr = 'PageTableWalker {name}("{name}", {cpu}, {fill_level}, {pscl5_set}, {pscl5_way}, {pscl4_set}, {pscl4_way}, {pscl3_set}, {pscl3_way}, {pscl2_set}, {pscl2_way}, {ptw_rq_size}, {ptw_mshr_size}, {ptw_max_read}, {ptw_max_write}, 0, {lower_level});\n'
 
@@ -137,6 +137,9 @@ for cpu in cores:
 # Assign defaults that are unique per core
 for cpu in cores:
     cpu['PTW'] = ChainMap(cpu.get('PTW',{}), config_file.get('PTW', {}), {'name': cpu['name'] + '_PTW', 'cpu': cpu['index'], 'frequency': cpu['frequency'], 'lower_level': cpu['L1D']}, default_ptw.copy())
+    if cpu['L1I'] == "DRAM":
+        break
+
     caches[cpu['L1I']] = ChainMap(caches[cpu['L1I']], {'frequency': cpu['frequency'], 'lower_level': cpu['L2C']}, default_l1i.copy())
     caches[cpu['L1D']] = ChainMap(caches[cpu['L1D']], {'frequency': cpu['frequency'], 'lower_level': cpu['L2C']}, default_l1d.copy())
     caches[cpu['ITLB']] = ChainMap(caches[cpu['ITLB']], {'frequency': cpu['frequency'], 'lower_level': cpu['STLB']}, default_itlb.copy())
@@ -153,9 +156,15 @@ for cpu in cores:
         caches[cache_name] = ChainMap(caches[cache_name], {'frequency': cpu['frequency'], 'lower_level': cpu['PTW']['name']}, default_stlb.copy())
 
     # LLC
-    cache_name = caches[caches[cpu['L1D']]['lower_level']]['lower_level']
-    if cache_name != 'DRAM':
-        caches[cache_name] = ChainMap(caches[cache_name], default_llc.copy())
+    try:
+        cache_name = caches[caches[cpu['L1D']]['lower_level']]['lower_level']
+        if cache_name != 'DRAM':
+            caches[cache_name] = ChainMap(caches[cache_name], default_llc.copy())
+    except KeyError:
+        cache_name = caches[cpu['L1D']]['lower_level']
+        if cache_name != 'DRAM':
+            caches[cache_name] = ChainMap(caches[cache_name], default_llc.copy())
+
 
 # Remove caches that are inaccessible
 accessible = [False]*len(caches)
@@ -332,12 +341,15 @@ for cpu in cores:
 
 
     # Resolve instruction prefetching function names
-    fname = os.path.join('prefetcher', caches[cpu['L1I']]['prefetcher'])
-    if not os.path.exists(fname):
-        fname = norm_fname(caches[cpu['L1I']]['prefetcher'])
-    if not os.path.exists(fname):
-        print('Path "' + fname + '" does not exist. Exiting...')
-        sys.exit(1)
+    if cpu['L1I'] != "DRAM":
+        fname = os.path.join('prefetcher', caches[cpu['L1I']]['prefetcher'])
+        if not os.path.exists(fname):
+            fname = norm_fname(caches[cpu['L1I']]['prefetcher'])
+        if not os.path.exists(fname):
+            print('Path "' + fname + '" does not exist. Exiting...')
+            sys.exit(1)
+    else:
+        fname = os.path.join('prefetcher', "no_instr")
 
     cpu['iprefetcher_name'] = 'p' + fname.translate(fname_translation_table)
     cpu['iprefetcher_initialize'] = 'pref_' + cpu['iprefetcher_name'] + '_initialize'
@@ -391,6 +403,8 @@ for f in os.listdir('obj'):
 # Add PTW to memory system
 ptws = {}
 for i in range(len(cores)):
+    if not 'name' in cores[i]['PTW']:
+        continue
     ptws[cores[i]['PTW']['name']] = cores[i]['PTW']
     cores[i]['PTW'] = cores[i]['PTW']['name']
 
@@ -399,17 +413,22 @@ memory_system = dict(**caches, **ptws)
 # Give each element a fill level
 active_keys = list(itertools.chain.from_iterable((cpu['ITLB'], cpu['DTLB'], cpu['L1I'], cpu['L1D']) for cpu in cores))
 for k in active_keys:
-    memory_system[k]['fill_level'] = 1
+    if k != "DRAM":
+        memory_system[k]['fill_level'] = 1
 
 for fill_level in range(1,len(memory_system)+1):
     for k in active_keys:
+        if k == "DRAM":
+            continue
         if memory_system[k]['lower_level'] != 'DRAM':
             memory_system[memory_system[k]['lower_level']]['fill_level'] = max(memory_system[memory_system[k]['lower_level']].get('fill_level',0), fill_level+1)
-    active_keys = [memory_system[k]['lower_level'] for k in active_keys if memory_system[k]['lower_level'] != 'DRAM']
+    active_keys = [memory_system[k]['lower_level'] for k in active_keys if k != 'DRAM' and memory_system[k]['lower_level'] != 'DRAM']
 
 # Remove name index
 memory_system = list(memory_system.values())
-
+for obj in memory_system:
+    print(obj)
+    print(obj['fill_level'])
 memory_system.sort(key=operator.itemgetter('fill_level'), reverse=True)
 
 # Check for lower levels in the array
@@ -440,6 +459,7 @@ with open(instantiation_file_name, 'wt') as wfp:
     wfp.write('#include "vmem.h"\n')
     wfp.write('#include "operable.h"\n')
     wfp.write('#include "' + os.path.basename(constants_header_name) + '"\n')
+    wfp.write(f'#include "{config_file["physical_memory"]["scheduler"]}.h"\n')
     wfp.write('#include <array>\n')
     wfp.write('#include <vector>\n')
 
@@ -671,19 +691,6 @@ with open('inc/cache_modules.inc', 'wt') as wfp:
     wfp.write('\n}\n')
     wfp.write('\n')
 
-with open('inc/msched.inc', 'wt') as wfp:
-    wfp.write('\n')
-    if config_file['physical_memory']['scheduler'] is not None:
-        wfp.write('#ifndef MSCHED\n')
-        wfp.write('class {} : public MEMORY_CONTROLLER\n'.format(config_file['physical_memory']['scheduler']))
-        wfp.write('{\npublic: \n')
-        wfp.write('void initalize_msched() override;\n')
-        wfp.write('void msched_cycle_operate() override;\n')
-        wfp.write('void msched_channel_operate(std::array<DRAM_CHANNEL, DRAM_CHANNELS> ::iterator channel_it) override;\n')
-        wfp.write('BANK_REQUEST* msched_get_request(std::array<DRAM_CHANNEL, DRAM_CHANNELS> ::iterator channel_it) override;\n')
-        wfp.write('void add_packet(std::vector<PACKET>::iterator packet, DRAM_CHANNEL& channel, bool is_write) override; \n')
-        wfp.write('{}(double freqScale) : MEMORY_CONTROLLER(freqScale){{}}'.format(config_file['physical_memory']['scheduler']))
-        wfp.write('};\n#endif\n')
 
 # Constants header
 with open(constants_header_name, 'wt') as wfp:
@@ -714,21 +721,23 @@ with open('Makefile', 'wt') as wfp:
     wfp.write('CXX := ' + config_file.get('CXX', 'g++') + '\n')
     wfp.write('CFLAGS := ' + config_file.get('CFLAGS', '-Wall -O3') + ' -std=gnu99\n')
     wfp.write('CXXFLAGS := ' + config_file.get('CXXFLAGS', '-Wall -O3') + ' -std=c++17\n')
-    wfp.write('CPPFLAGS := ' + config_file.get('CPPFLAGS', '') + ' -Iinc -MMD -MP\n')
+    wfp.write('CPPFLAGS := ' + config_file.get('CPPFLAGS', '') + f' -Imem_scheduler/{config_file["physical_memory"]["scheduler"]} -Iinc -MMD -MP\n')
     wfp.write('LDFLAGS := ' + config_file.get('LDFLAGS', '') + '\n')
     wfp.write('LDLIBS := ' + config_file.get('LDLIBS', '') + '\n')
     wfp.write('\n')
     wfp.write('.phony: all clean\n\n')
     wfp.write('all: ' + config_file['executable_name'] + '\n\n')
     wfp.write('clean: \n')
-    wfp.write('\t$(RM) ' + constants_header_name + '\n')
-    wfp.write('\t$(RM) ' + instantiation_file_name + '\n')
-    wfp.write('\t$(RM) ' + 'inc/cache_modules.inc' + '\n')
-    wfp.write('\t$(RM) ' + 'inc/ooo_cpu_modules.inc' + '\n')
     wfp.write('\t find . -name \*.o -delete\n\t find . -name \*.d -delete\n\t $(RM) -r obj\n\n')
     for v in libfilenames.values():
         wfp.write('\t find {0} -name \*.o -delete\n\t find {0} -name \*.d -delete\n'.format(*v))
     wfp.write('\n')
+    wfp.write('reset: clean \n')
+    wfp.write('\t$(RM) ' + constants_header_name + '\n')
+    wfp.write('\t$(RM) ' + instantiation_file_name + '\n')
+    wfp.write('\t$(RM) ' + 'inc/cache_modules.inc' + '\n')
+    wfp.write('\t$(RM) ' + 'inc/ooo_cpu_modules.inc' + '\n')
+    wfp.write('\t$(RM) ' + 'Makefile' + '\n')
     wfp.write(config_file['executable_name'] + ': $(patsubst %.cc,%.o,$(wildcard src/*.cc)) ' + ' '.join('obj/' + k for k in libfilenames) + '\n')
     wfp.write('\t$(CXX) $(LDFLAGS) -o $@ $^ $(LDLIBS)\n\n')
 

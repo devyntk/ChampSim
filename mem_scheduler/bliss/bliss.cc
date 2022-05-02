@@ -1,77 +1,52 @@
+//
+// Created by devyn on 5/1/22.
+//
 #include "bliss.h"
-#include <array>
-#include <numeric>
-#include <algorithm>
 
-int last_cpu_req = NUM_CPUS;
-int req_served = 0 ;
-const int blacklist_threshold = 4;
-std::array<bool, NUM_CPUS> is_blacklisted;
-const int clearing_interval = 10000;
-int clearing_count = 0;
-
-void bliss::initalize_msched() {}
-void bliss::msched_cycle_operate() {
-  clearing_count++;
-  if (clearing_count >= clearing_interval){
-    for(long unsigned int i = 0; i < NUM_CPUS; i++)
-      is_blacklisted[i] = false;
-  }
+bliss_channel::req_it bliss_channel::get_new_active_request() {
+  return std::min_element(std::begin(bank_request), std::end(bank_request), min_event_cycle<BANK_REQUEST>());
+//  if(req->valid) {
+//    if (req->pkt->cpu == last_cpu) {
+//      requests_served += 1;
+//      if (requests_served > blacklist_threshold) {
+//        is_blacklisted[last_cpu] = true;
+//      }
+//    } else {
+//      requests_served = 0;
+//    }
+//  } else {
+//    return std::end(bank_request);
+//  }
+//
+//  return req;
 }
-void bliss::add_packet(std::vector<PACKET>::iterator packet, DRAM_CHANNEL& channel, bool is_write){
-  MEMORY_CONTROLLER::add_packet(packet, channel, is_write);
+struct next_schedule_ready : public invalid_is_maximal<PACKET, min_event_cycle<PACKET>, PACKET, is_unscheduled, is_unscheduled> {};
+PACKET& bliss_channel::fill_bank_request() {
+  std::vector<PACKET>::iterator iter_next_schedule;
+  if (write_mode)
+    iter_next_schedule = std::min_element(std::begin(WQ), std::end(WQ), next_schedule_ready());
+  else
+    iter_next_schedule = std::min_element(std::begin(RQ), std::end(RQ), next_schedule_ready());
+  return *iter_next_schedule;
 }
-void bliss::msched_channel_operate(std::array<DRAM_CHANNEL, DRAM_CHANNELS> ::iterator channel_it) {
-  DRAM_CHANNEL& channel = *channel_it;
-  // parse the read and write queues and add to our own channel ATLAS queue
-  for (auto it = std::begin(channel.RQ); it != std::end(channel.RQ); it++){
-    add_packet(it, channel, false);
-  }
-  for (auto it = std::begin(channel.WQ); it != std::end(channel.WQ); it++){
-    add_packet(it, channel, true);
-  }
-
-  if (channel.active_request != std::end(channel.bank_request)) {
-    // part of a memory episode, increase attained service for this thread (cpu)
-    int cpu = channel.active_request->pkt->cpu;
-    if (cpu == last_cpu_req) {
-      req_served++;
-      // check if the process that we're increasing needs to be blacklisted
-      if (req_served > blacklist_threshold){
-        is_blacklisted[cpu] = true;
-        req_served = 0;
-      }
-    } else {
-      // different application, reset trackers
-      req_served = 0;
-      last_cpu_req = cpu;
-    }
-  }
+void bliss_channel::business_operate() {
+//  clearing_count++;
+//  if (clearing_count >= clearing_interval){
+//    for(long unsigned int i = 0; i < NUM_CPUS; i++)
+//      is_blacklisted[i] = false;
+//  }
 }
-bool bliss_sorter(BANK_REQUEST const& rhs, BANK_REQUEST const& lhs) {
-  bool lhs_blacklisted = is_blacklisted[lhs.pkt->cpu];
-  bool rhs_blacklisted = is_blacklisted[rhs.pkt->cpu];
-  if (lhs_blacklisted != rhs_blacklisted) {
-    return lhs_blacklisted < rhs_blacklisted;
+bool bliss_channel::operator()(const BANK_REQUEST& lhs, const BANK_REQUEST& rhs) {
+//  if (lhs.valid && rhs.valid){
+//    bool lhs_blacklist = is_blacklisted[lhs.pkt->cpu];
+//    bool rhs_blacklist = is_blacklisted[rhs.pkt->cpu];
+//    if (lhs_blacklist != rhs_blacklist)
+//      return lhs_blacklist < rhs_blacklist;
+//  } else {
+//    return lhs.valid > rhs.valid;
+//  }
+  if (lhs.row_buffer_hit != rhs.row_buffer_hit) {
+    return lhs.row_buffer_hit < rhs.row_buffer_hit;
   }
-  if (lhs.row_buffer_hit != rhs.row_buffer_hit)
-    return lhs.row_buffer_hit > rhs.row_buffer_hit;
   return lhs.event_cycle < rhs.event_cycle;
-}
-BANK_REQUEST* bliss::msched_get_request(std::array<DRAM_CHANNEL, DRAM_CHANNELS> ::iterator channel_it) {
-  DRAM_CHANNEL& channel = *channel_it;
-  auto new_req = std::min_element(std::begin(channel.bank_request),std::end(channel.bank_request), bliss_sorter);
-
-  // check if we're switching read/write mode, if so, add penalty
-  if (new_req->is_write != channel.write_mode) {
-    // Add data bus turn-around time
-    if (channel.active_request != std::end(channel.bank_request))
-      channel.dbus_cycle_available = channel.active_request->event_cycle + DRAM_DBUS_TURN_AROUND_TIME; // After ongoing finish
-    else
-      channel.dbus_cycle_available = current_cycle + DRAM_DBUS_TURN_AROUND_TIME;
-    // Set the channel mode
-    channel.write_mode = new_req->is_write;
-  }
-
-  return new_req;
 }
