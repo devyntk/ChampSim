@@ -13,27 +13,39 @@ std::array<int, NUM_CPUS> per_thread_as;
 std::array<int, NUM_CPUS> per_thread_total_as;
 std::array<int, NUM_CPUS> thread_rank;
 
-struct atlas_request {
-  bool over_threshold;
-  uint64_t schedule_cycle;
-  bool is_write;
-  std::array<BANK_REQUEST, DRAM_RANKS* DRAM_BANKS>::iterator request;
-};
+extern MEMORY_CONTROLLER DRAM;
 
-std::array<std::array<atlas_request, DRAM_RANKS* DRAM_BANKS>, DRAM_CHANNELS> request_attributes;
+bool is_row_hit(const PACKET& packet) {
+  uint32_t op_rank = DRAM.dram_get_rank(packet.address), op_bank = DRAM.dram_get_bank(packet.address),
+           op_row = DRAM.dram_get_row(packet.address), op_chn = DRAM.dram_get_channel(packet.address);
+  return DRAM.channels[op_chn].bank_request[op_rank * DRAM_BANKS + op_bank].open_row == op_row;
+}
+
+bool over_threshold(const PACKET& packet){
+  return (packet.event_cycle+T > DRAM.current_cycle);
+}
+
+struct bliss_event_cycle {
+  bool operator()(const PACKET& lhs, const PACKET& rhs) {
+    if (over_threshold(lhs) != over_threshold(rhs))
+      return over_threshold(lhs) > over_threshold(rhs);
+    if (lhs.cpu != rhs.cpu)
+      return thread_rank[lhs.cpu] > thread_rank[rhs.cpu];
+    if (is_row_hit(lhs) != is_row_hit(rhs))
+      return is_row_hit(lhs) > is_row_hit(rhs);
+    return lhs.event_cycle < rhs.event_cycle;
+  }
+};
+struct is_unscheduled {
+  bool operator()(const PACKET& lhs) { return !lhs.scheduled; }
+};
+struct next_schedule : public invalid_is_maximal<PACKET, invalid_is_maximal<PACKET, bliss_event_cycle>, PACKET, is_unscheduled, is_unscheduled> {
+};
 
 void atlas::initalize_msched() {}
 void atlas::msched_cycle_operate() {
   quantum_cycles++;
 
-  // go through all atlas attributes and update them
-  for (auto channel_attributes : request_attributes){
-    for (auto entry : channel_attributes) {
-      if (entry.schedule_cycle+T >= current_cycle) {
-        entry.over_threshold = true;
-      }
-    }
-  }
 
   if (quantum_cycles >= quantum_length) {
     // end of quantum, update TotalAS
@@ -63,7 +75,6 @@ void atlas::add_packet(std::vector<PACKET>::iterator packet, DRAM_CHANNEL& chann
       packet->event_cycle = std::numeric_limits<uint64_t>::max();
       auto req = std::begin(channel.bank_request);
       std::advance(req, op_idx);
-      request_attributes[dram_get_channel(packet->address)][op_idx] = {false, current_cycle, is_write, req};
     }
   }
 
@@ -83,23 +94,13 @@ void atlas::msched_channel_operate(std::array<DRAM_CHANNEL, DRAM_CHANNELS> ::ite
     per_thread_as[channel.active_request->pkt->cpu] += 1;
   }
 }
-bool atlas_sorter(atlas_request const& rhs, atlas_request const& lhs) {
-  if (lhs.over_threshold != rhs.over_threshold)
-    return lhs.over_threshold > rhs.over_threshold;
-  if (lhs.request->pkt->cpu != lhs.request->pkt->cpu) {
-    auto lhs_cpu_priority = thread_rank[lhs.request->pkt->cpu];
-    auto rhs_cpu_priority = thread_rank[rhs.request->pkt->cpu];
-    return lhs_cpu_priority > rhs_cpu_priority;
-  }
-  if (lhs.request->row_buffer_hit != rhs.request->row_buffer_hit)
-    return lhs.request->row_buffer_hit > rhs.request->row_buffer_hit;
-  return lhs.schedule_cycle < rhs.schedule_cycle;
+bool atlas_sorter(BANK_REQUEST const& rhs, BANK_REQUEST const& lhs) {
+  bliss_event_cycle cmp;
+  return cmp(*rhs.pkt, *lhs.pkt);
 }
-
 BANK_REQUEST* atlas::msched_get_request(std::array<DRAM_CHANNEL, DRAM_CHANNELS> ::iterator channel_it) {
   DRAM_CHANNEL& channel = *channel_it;
-  auto channel_rqs = request_attributes[std::distance(std::begin(channels), channel_it)];
-  auto new_req = std::min_element(std::begin(channel_rqs),std::end(channel_rqs), atlas_sorter);
+  auto new_req = std::min_element(std::begin(channel.bank_request),std::end(channel.bank_request), atlas_sorter);
 
   // check if we're switching read/write mode, if so, add penalty
   if (new_req->is_write != channel.write_mode) {
@@ -112,5 +113,5 @@ BANK_REQUEST* atlas::msched_get_request(std::array<DRAM_CHANNEL, DRAM_CHANNELS> 
     channel.write_mode = new_req->is_write;
   }
 
-  return new_req->request;
+  return new_req;
 }

@@ -3,10 +3,25 @@
 #include <numeric>
 #include <algorithm>
 
+extern MEMORY_CONTROLLER DRAM;
+
+bool is_row_hit(const PACKET& packet) {
+  uint32_t op_rank = DRAM.dram_get_rank(packet.address), op_bank = DRAM.dram_get_bank(packet.address),
+           op_row = DRAM.dram_get_row(packet.address), op_chn = DRAM.dram_get_channel(packet.address);
+  return DRAM.channels[op_chn].bank_request[op_rank * DRAM_BANKS + op_bank].open_row == op_row;
+}
+
+struct frfcfscmp_event_cycle {
+  bool operator()(const PACKET& lhs, const PACKET& rhs) {
+    if (is_row_hit(lhs) != is_row_hit(rhs))
+      return is_row_hit(lhs) > is_row_hit(rhs);
+    return lhs.event_cycle < rhs.event_cycle;
+  }
+};
 struct is_unscheduled {
   bool operator()(const PACKET& lhs) { return !lhs.scheduled; }
 };
-struct next_schedule : public invalid_is_maximal<PACKET, min_event_cycle<PACKET>, PACKET, is_unscheduled, is_unscheduled> {
+struct next_schedule : public invalid_is_maximal<PACKET, invalid_is_maximal<PACKET, frfcfscmp_event_cycle>, PACKET, is_unscheduled, is_unscheduled> {
 };
 
 
@@ -55,7 +70,7 @@ void frfcfs::msched_channel_operate(std::array<DRAM_CHANNEL, DRAM_CHANNELS> ::it
 bool frfcfs_sorter(BANK_REQUEST const& rhs, BANK_REQUEST const& lhs) {
   if (lhs.row_buffer_hit != rhs.row_buffer_hit)
     // swapped since we want to sort the buffer hits at the bottom
-    return lhs.row_buffer_hit > rhs.row_buffer_hit;
+    return lhs.row_buffer_hit < rhs.row_buffer_hit;
   return lhs.event_cycle < rhs.event_cycle;
 }
 BANK_REQUEST* frfcfs::msched_get_request(std::array<DRAM_CHANNEL, DRAM_CHANNELS> ::iterator channel_it) {

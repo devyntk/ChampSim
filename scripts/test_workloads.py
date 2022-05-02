@@ -6,7 +6,7 @@ from pathlib import Path
 import math
 import subprocess
 
-instr_flags = "--warmup_instructions 200000 --simulation_instructions 500000"
+instr_flags = "--warmup_instructions 10000 --simulation_instructions 50000"
 scheds=("fcfs", "frfcfs", "atlas", "bliss")
 num_cores = 4
 percent_mem = 0.50

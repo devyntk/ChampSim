@@ -218,5 +218,6 @@ void MEMORY_CONTROLLER::add_packet(std::vector<PACKET>::iterator packet, DRAM_CH
       packet->scheduled = true;
       packet->event_cycle = std::numeric_limits<uint64_t>::max();
     }
+
   }
 }
